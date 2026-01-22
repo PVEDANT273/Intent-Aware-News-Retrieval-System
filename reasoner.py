@@ -50,7 +50,8 @@ class Reasoner:
 
         response = client.chat(
             model="llama3.1:8b",
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
+            options={"temperature": 0.3}
         )
 
         return response
