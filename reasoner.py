@@ -54,5 +54,5 @@ class Reasoner:
             options={"temperature": 0.3}
         )
 
-        return response
+        return response["message"]["content"]
 
