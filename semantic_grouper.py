@@ -13,11 +13,12 @@ class SemanticGrouper:
 
     def _build_representation(self, article):
         parts = [
-            article.get("title", ""),
-            article.get("description", ""),
-            article.get("content", "")[:200]
+            article.get("title") or "",
+            article.get("description") or "",
+            (article.get("content") or "")[:200]
         ]
         return " ".join(p for p in parts if p)
+
 
     def group(self, articles) ->list:
 
