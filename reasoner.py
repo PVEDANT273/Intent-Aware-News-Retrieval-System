@@ -2,6 +2,12 @@ from ollama import Client
 import re
 import json
 
+def pick_representative_article(articles):
+            return max(
+                articles,
+                key=lambda a: len((a.get("content") or "") + (a.get("description") or ""))
+                )
+
 class Reasoner:
     def __init__(self, list_of_groups, topic, intent):
         self.list_of_groups = list_of_groups
@@ -85,17 +91,22 @@ class Reasoner:
         return json.loads(json_str)
     
     
-    def get_original_articles(self, llm_output : list, original_grouped : list):
+    def build(self, ranked_groups, grouped_articles):
+        
         results = []
 
-        for item in llm_output:
+        for item in ranked_groups:
             group_id = item["group_id"]
+            articles = grouped_articles[group_id]
+
+            representative = pick_representative_article(articles)
 
             results.append({
                 "group_id": group_id,
                 "rank": item["rank"],
-                "reason": item["reason"],
-                "articles": original_grouped[group_id]
+                "reason": item["reason"], 
+                "representative_article": representative,
+                "all_articles": articles
             })
 
         return results
