@@ -30,23 +30,35 @@ class Reasoner:
     def rank(self):
         articles = self.extract()
         prompt = f"""
+            You are a JSON-only ranking engine.
+
             Topic: {self.topic}
             Intent: {self.intent}
 
-            Here are several groups of articles:
+            Below are groups of articles:
             {articles}
 
-            Task : Rank the groups by how well they satisfy the intent and summarize why
-            Output Format(strict Json):
+            TASK:
+            Select ONLY the groups relevant to the intent and rank them.
+
+            OUTPUT RULES:
+            - Output MUST be valid JSON
+            - Output MUST be a JSON array
+            - Do NOT include explanations, analysis, markdown, or text outside JSON
+            - Do NOT include groups that are irrelevant
+
+            OUTPUT FORMAT:
             [
-                {{
-                    "group_id": <number>,
-                    "rank": <number>,
-                    "reason": "<one or two short sentences>"
-                }}
+            {{
+                "group_id": <number>,
+                "rank": <number>,
+                "reason": "<short explanation>"
+            }}
             ]
 
-        """
+            If you violate these rules, the output is invalid.
+            """
+
 
         client = Client(host="http://localhost:11434")
 
@@ -58,31 +70,33 @@ class Reasoner:
 
         raw = response["message"]["content"].strip()
 
-        raw = re.sub(r"```json|```", "", raw).strip()
+        pattern = r"```json\s*(.*?)\s*```"
+        match = re.search(pattern, raw, re.DOTALL)
 
-        start = raw.find("[")
-        end = raw.rfind("]") + 1
+        if not match:
+            # fallback to bracket extraction
+            start = raw.find("[")
+            end = raw.rfind("]") + 1
+            if start == -1 or end == -1:
+                raise ValueError("No JSON found in LLM output")
+            return json.loads(raw[start:end])
 
-        if start == -1 or end == -1:
-            raise ValueError("No JSON found in LLM response")
-
-        json_str = raw[start:end]
-
+        json_str = match.group(1).strip()
         return json.loads(json_str)
     
     
-    def get_original_articles(self, llm_json : list, original_grouped : list):
+    def get_original_articles(self, llm_output : list, original_grouped : list):
         results = []
 
-        for item in llm_json:
+        for item in llm_output:
             group_id = item["group_id"]
 
-        results.append({
-            "group_id": group_id,
-            "rank": item["rank"],
-            "reason": item["reason"],
-            "articles": original_grouped[group_id]
-        })
+            results.append({
+                "group_id": group_id,
+                "rank": item["rank"],
+                "reason": item["reason"],
+                "articles": original_grouped[group_id]
+            })
 
         return results
 
