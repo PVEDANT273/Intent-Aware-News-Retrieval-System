@@ -21,26 +21,21 @@ class ArticleCleaner:
         seen_urls = set()
         seen_titles = set()
         unique_articles = []
-        duplicate = False
 
         for article in normalized_articles:
-            if article['url']:
-                if article['url'].lower().strip() in seen_urls:
-                    duplicate = True
+            url = article['url'].lower().strip() if article['url'] else None
+            title = article['title'].lower().strip() if article['title'] else None
 
-            if article['title']:
-                if article['title'].lower().strip() in seen_titles:
-                    duplicate = True
+            is_dup = (url is not None and url in seen_urls) or \
+                    (title is not None and title in seen_titles)
 
-            if not duplicate:
+            if not is_dup:
                 unique_articles.append(article)
-                if article['url']:
-                    seen_urls.add(article['url'].lower().strip())
-                if article['title']:
-                    seen_titles.add(article['title'].lower().strip())
-            
-            duplicate = False
-        
+                if url:
+                    seen_urls.add(url)
+                if title:
+                    seen_titles.add(title)
+
         return unique_articles
     
 

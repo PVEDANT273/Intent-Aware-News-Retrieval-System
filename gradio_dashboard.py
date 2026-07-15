@@ -2,7 +2,6 @@ from article_cleaner import ArticleCleaner
 from news_api_fetcher import NewsApiFetcher
 from semantic_grouper import SemanticGrouper
 from reasoner import Reasoner
-
 import gradio as gr
 
 npi = NewsApiFetcher()
@@ -36,7 +35,7 @@ def format_results(results):
 
             ---
             """
-        return output
+    return output
 
 def gradio_app(topic, intent):
     results = run_pipeline(topic, intent)

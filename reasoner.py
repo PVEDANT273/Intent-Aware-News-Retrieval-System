@@ -1,6 +1,11 @@
-from ollama import Client
+import os
+from ollama import Client, ResponseError
 import re
 import json
+
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+
 
 def pick_representative_article(articles):
             return max(
@@ -66,29 +71,54 @@ class Reasoner:
             """
 
 
-        client = Client(host="http://localhost:11434")
+        client = Client(host=OLLAMA_HOST)
 
-        response = client.chat(
-            model="llama3.1:8b",
-            messages=[{"role": "user", "content": prompt}],
-            options={"temperature": 0.3}
+        max_attempts = 2
+        last_error = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = client.chat(
+                    model=OLLAMA_MODEL,
+                    messages=[{"role": "user", "content": prompt}],
+                    options={"temperature": 0.3}
+                )
+            except ConnectionError as e:
+                raise RuntimeError(
+                    f"Could not reach Ollama at {OLLAMA_HOST}. "
+                    "Is 'ollama serve' running?"
+                ) from e
+            except ResponseError as e:
+                raise RuntimeError(
+                    f"Ollama model '{OLLAMA_MODEL}' failed to respond "
+                    f"(is it pulled? try 'ollama pull {OLLAMA_MODEL}'): {e}"
+                ) from e
+
+            raw = response["message"]["content"].strip()
+
+            pattern = r"```json\s*(.*?)\s*```"
+            match = re.search(pattern, raw, re.DOTALL)
+
+            if match:
+                json_str = match.group(1).strip()
+            else:
+                # fallback to bracket extraction
+                start = raw.find("[")
+                end = raw.rfind("]") + 1
+                if start == -1 or end == -1:
+                    last_error = ValueError("No JSON found in LLM output")
+                    continue
+                json_str = raw[start:end]
+
+                try:
+                    return json.loads(json_str)
+                except json.JSONDecodeError as e:
+                    last_error = e
+                    continue
+
+        raise ValueError(
+            f"LLM did not return valid JSON after {max_attempts} attempt(s): {last_error}"
         )
-
-        raw = response["message"]["content"].strip()
-
-        pattern = r"```json\s*(.*?)\s*```"
-        match = re.search(pattern, raw, re.DOTALL)
-
-        if not match:
-            # fallback to bracket extraction
-            start = raw.find("[")
-            end = raw.rfind("]") + 1
-            if start == -1 or end == -1:
-                raise ValueError("No JSON found in LLM output")
-            return json.loads(raw[start:end])
-
-        json_str = match.group(1).strip()
-        return json.loads(json_str)
     
     
     def build(self, ranked_groups, grouped_articles):
