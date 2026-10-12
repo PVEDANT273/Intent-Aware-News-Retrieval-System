@@ -2,6 +2,7 @@ import json
 import re
 
 from ollama import Client
+from datetime import datetime, timezone
 
 MAX_RETRIES = 3
 
@@ -135,17 +136,38 @@ class Reasoner:
             f"LLM did not return valid JSON after {MAX_RETRIES} attempts: {last_error}"
         )
 
-    def build(self, ranked_groups, grouped_articles, top_n=None):
-        if top_n is not None:
-            ranked_groups = ranked_groups[:top_n]
+    def build(
+        self,
+        ranked_groups,
+        grouped_articles,
+        top_n=None,
+        recency_weight=0.2,
+    ):
+        scored = []
 
-        results = []
         for item in ranked_groups:
             articles = grouped_articles[item["group_id"]]
 
+            llm_score = 1 / item["rank"]
+
+            blended = (
+                (1 - recency_weight) * llm_score
+                + recency_weight * self._recency_score(articles)
+            )
+
+            scored.append((blended, item, articles))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        if top_n is not None:
+            scored = scored[:top_n]
+
+        results = []
+
+        for rank, (score, item, articles) in enumerate(scored, start=1):
             results.append({
                 "group_id": item["group_id"],
-                "rank": item["rank"],
+                "rank": rank,
                 "reason": item["reason"],
                 "representative_article": pick_representative_article(articles),
                 "all_articles": articles,
@@ -174,3 +196,24 @@ class Reasoner:
         )
 
         return response["message"]["content"].strip()
+
+    def _recency_score(self, group_articles):
+        dates = [
+            a.get("published_at")
+            for a in group_articles
+            if a.get("published_at")
+        ]
+
+        if not dates:
+            return 0.0
+
+        newest = max(
+            datetime.fromisoformat(d.replace("Z", "+00:00"))
+            for d in dates
+        )
+
+        hours_old = (
+            datetime.now(timezone.utc) - newest
+        ).total_seconds() / 3600
+
+        return max(0.0, 1 - hours_old / 168)
