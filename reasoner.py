@@ -1,46 +1,47 @@
-import os
-from ollama import Client, ResponseError
-import re
 import json
+import re
 
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+from ollama import Client
+
+MAX_RETRIES = 3
 
 
 def pick_representative_article(articles):
-            return max(
-                articles,
-                key=lambda a: len((a.get("content") or "") + (a.get("description") or ""))
-                )
+    return max(
+        articles,
+        key=lambda a: len((a.get("content") or "") + (a.get("description") or "")),
+    )
+
 
 class Reasoner:
-    def __init__(self, list_of_groups, topic, intent):
+    def __init__(
+        self,
+        list_of_groups,
+        topic,
+        intent,
+        model="llama3.1:8b",
+        host="http://localhost:11434",
+    ):
         self.list_of_groups = list_of_groups
         self.topic = topic
         self.intent = intent
+        self.model = model
+        self.client = Client(host=host)
 
     def extract(self):
         groups_data = []
-        for i, groups in enumerate(self.list_of_groups):
-            titles = []
-            sources = []
-
-            for article in groups:
-                titles.append(article.get("title", ""))
-                sources.append(article.get("source", ""))
-
+        for i, group in enumerate(self.list_of_groups):
             groups_data.append({
                 "group_id": i,
-                "number_of_articles" : len(groups),
-                "titles" : titles,
-                "sources": sources 
-            })            
+                "number_of_articles": len(group),
+                "titles": [a.get("title") or "" for a in group],
+                "sources": [a.get("source") or "" for a in group],
+            })
         return groups_data
-    
-    
-    def rank(self):
-        articles = self.extract()
-        prompt = f"""
+
+    def _build_prompt(self):
+        articles = json.dumps(self.extract(), indent=2)
+        return f"""
             You are a JSON-only ranking engine.
 
             Topic: {self.topic}
@@ -70,74 +71,82 @@ class Reasoner:
             If you violate these rules, the output is invalid.
             """
 
+    @staticmethod
+    def _parse_json(raw):
+        raw = raw.strip()
 
-        client = Client(host=OLLAMA_HOST)
+        # Prefer a ```json fenced block if the model added one
+        match = re.search(r"```json\s*(.*?)\s*```", raw, re.DOTALL)
+        if match:
+            raw = match.group(1).strip()
 
-        max_attempts = 2
+        start = raw.find("[")
+        end = raw.rfind("]")
+        if start == -1 or end == -1 or end < start:
+            raise ValueError("No JSON array found in LLM output")
+
+        return json.loads(raw[start:end + 1])
+
+    def _validate(self, ranked):
+        """Keep only well-formed items with a real group_id, no duplicates."""
+        if not isinstance(ranked, list):
+            raise ValueError("LLM output is not a JSON array")
+
+        valid = []
+        seen = set()
+        for item in ranked:
+            try:
+                group_id = int(item["group_id"])
+                rank = int(item["rank"])
+            except (KeyError, TypeError, ValueError):
+                continue
+
+            if not 0 <= group_id < len(self.list_of_groups) or group_id in seen:
+                continue
+
+            seen.add(group_id)
+            valid.append({
+                "group_id": group_id,
+                "rank": rank,
+                "reason": str(item.get("reason", "")),
+            })
+
+        return sorted(valid, key=lambda x: x["rank"])
+
+    def rank(self):
+        prompt = self._build_prompt()
         last_error = None
 
-        for attempt in range(1, max_attempts + 1):
+        for _ in range(MAX_RETRIES):
             try:
-                response = client.chat(
-                    model=OLLAMA_MODEL,
+                response = self.client.chat(
+                    model=self.model,
                     messages=[{"role": "user", "content": prompt}],
-                    options={"temperature": 0.3}
+                    options={"temperature": 0.3},
                 )
-            except ConnectionError as e:
-                raise RuntimeError(
-                    f"Could not reach Ollama at {OLLAMA_HOST}. "
-                    "Is 'ollama serve' running?"
-                ) from e
-            except ResponseError as e:
-                raise RuntimeError(
-                    f"Ollama model '{OLLAMA_MODEL}' failed to respond "
-                    f"(is it pulled? try 'ollama pull {OLLAMA_MODEL}'): {e}"
-                ) from e
+                raw = response["message"]["content"]
+                return self._validate(self._parse_json(raw))
+            except (ValueError, json.JSONDecodeError) as e:
+                last_error = e  # malformed output, try again
 
-            raw = response["message"]["content"].strip()
-
-            pattern = r"```json\s*(.*?)\s*```"
-            match = re.search(pattern, raw, re.DOTALL)
-
-            if match:
-                json_str = match.group(1).strip()
-            else:
-                # fallback to bracket extraction
-                start = raw.find("[")
-                end = raw.rfind("]") + 1
-                if start == -1 or end == -1:
-                    last_error = ValueError("No JSON found in LLM output")
-                    continue
-                json_str = raw[start:end]
-
-                try:
-                    return json.loads(json_str)
-                except json.JSONDecodeError as e:
-                    last_error = e
-                    continue
-
-        raise ValueError(
-            f"LLM did not return valid JSON after {max_attempts} attempt(s): {last_error}"
+        raise RuntimeError(
+            f"LLM did not return valid JSON after {MAX_RETRIES} attempts: {last_error}"
         )
-    
-    
-    def build(self, ranked_groups, grouped_articles):
-        
+
+    def build(self, ranked_groups, grouped_articles, top_n=None):
+        if top_n is not None:
+            ranked_groups = ranked_groups[:top_n]
+
         results = []
-
         for item in ranked_groups:
-            group_id = item["group_id"]
-            articles = grouped_articles[group_id]
-
-            representative = pick_representative_article(articles)
+            articles = grouped_articles[item["group_id"]]
 
             results.append({
-                "group_id": group_id,
+                "group_id": item["group_id"],
                 "rank": item["rank"],
-                "reason": item["reason"], 
-                "representative_article": representative,
-                "all_articles": articles
+                "reason": item["reason"],
+                "representative_article": pick_representative_article(articles),
+                "all_articles": articles,
             })
 
         return results
-
