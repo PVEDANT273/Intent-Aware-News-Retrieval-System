@@ -159,6 +159,8 @@ class Reasoner:
 
         scored.sort(key=lambda x: x[0], reverse=True)
 
+        scored = self._diversify(scored)
+        
         if top_n is not None:
             scored = scored[:top_n]
 
@@ -217,3 +219,24 @@ class Reasoner:
         ).total_seconds() / 3600
 
         return max(0.0, 1 - hours_old / 168)
+
+    def _diversify(self, scored, max_per_source=2):
+        from collections import defaultdict
+
+        source_counts = defaultdict(int)
+        ordered, deferred = [], []
+
+        for entry in scored:
+            _, item, articles = entry
+
+            source = pick_representative_article(articles).get(
+                "source", "unknown"
+            )
+
+            if source_counts[source] < max_per_source:
+                ordered.append(entry)
+                source_counts[source] += 1
+            else:
+                deferred.append(entry)
+
+        return ordered + deferred
