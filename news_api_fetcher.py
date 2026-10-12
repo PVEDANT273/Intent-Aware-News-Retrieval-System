@@ -21,32 +21,36 @@ class NewsApiFetcher:
     def _clamp_page_size(page_size):
         return max(1, min(int(page_size), NEWSAPI_MAX_PAGE_SIZE))
 
-    def get_top_headlines(
-        self,
-        topic: str,
-        sources=None,
-        category=None,
-        language="en",
-        country=None,
-        page_size=20,
-    ):
-        # NewsAPI: 'sources' cannot be combined with 'country' or 'category'
-        if sources and (country or category):
-            raise ValueError(
-                "Invalid parameters: 'sources' cannot be used with "
-                "'country' or 'category' in get_top_headlines()"
+    def get_top_headlines_paged(self, topic, max_articles=100, **kwargs):
+        collected = []
+        page = 1
+        page_size = min(100, max_articles)
+
+        while len(collected) < max_articles:
+            resp = self.npi.get_top_headlines(
+                q=topic,
+                page=page,
+                page_size=page_size,
+                **kwargs
             )
 
-        self.top_headlines = self.npi.get_top_headlines(
-            q=topic,
-            sources=sources,
-            category=category,
-            language=language,
-            country=country,
-            page_size=self._clamp_page_size(page_size),
-        )
+            articles = resp.get("articles", [])
 
-        return self.top_headlines
+            if not articles:
+                break
+
+            collected.extend(articles)
+
+            if len(articles) < page_size:
+                break  # No more pages
+
+            page += 1
+
+        return {
+            "status": "ok",
+            "totalResults": len(collected),
+            "articles": collected[:max_articles]
+        }
 
     def get_all_articles(
         self,
