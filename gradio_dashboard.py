@@ -10,8 +10,12 @@ cleaner = ArticleCleaner()
 sg = SemanticGrouper()
 
 
-def run_pipeline(topic, intent, num_fetch, num_results):
-    raw = npi.get_top_headlines(topic=topic, country="us", page_size=num_fetch)
+def run_pipeline(topic, intent, num_fetch, num_results, selected_model):
+    raw = npi.get_top_headlines(
+        topic=topic,
+        country="us",
+        page_size=num_fetch,
+    )
     cleaned = cleaner.normalize(raw)
     unique = cleaner.remove_duplicates(cleaned)
 
@@ -20,8 +24,14 @@ def run_pipeline(topic, intent, num_fetch, num_results):
 
     grouped = sg.group(unique)
 
-    reasoner = Reasoner(grouped, topic, intent)
+    reasoner = Reasoner(
+        grouped,
+        topic,
+        intent,
+        model=selected_model,
+    )
     ranked = reasoner.rank()
+
     return reasoner.build(ranked, grouped, top_n=num_results)
 
 
@@ -39,6 +49,8 @@ def format_results(results):
             f"### Rank {res['rank']}",
             f"**Why relevant:** {res['reason']}",
             "",
+            f"**Summary:** {res['summary']}",
+            "",
             f"**Title:** {art['title']}",
             "",
             f"**Source:** {art['source']}",
@@ -53,14 +65,21 @@ def format_results(results):
     return "\n\n".join(blocks)
 
 
-def gradio_app(topic, intent, num_fetch, num_results):
+def gradio_app(topic, intent, num_fetch, num_results, selected_model):
     topic = (topic or "").strip()
     intent = (intent or "").strip()
+
     if not topic or not intent:
         raise gr.Error("Please enter both a topic and an intent.")
 
     try:
-        results = run_pipeline(topic, intent, int(num_fetch), int(num_results))
+        results = run_pipeline(
+            topic,
+            intent,
+            int(num_fetch),
+            int(num_results),
+            selected_model,
+        )
     except Exception as e:
         raise gr.Error(f"Something went wrong: {e}")
 
@@ -73,14 +92,31 @@ dashboard = gr.Interface(
         gr.Textbox(label="Topic", placeholder="AI"),
         gr.Textbox(label="Intent", placeholder="Effects on RAM prices"),
         gr.Slider(
-            minimum=10, maximum=100, value=30, step=5,
+            minimum=10,
+            maximum=100,
+            value=30,
+            step=5,
             label="Articles to fetch",
             info="How many headlines to pull from NewsAPI (max 100).",
         ),
         gr.Slider(
-            minimum=1, maximum=10, value=5, step=1,
+            minimum=1,
+            maximum=10,
+            value=5,
+            step=1,
             label="Results to show",
             info="How many top-ranked stories to display.",
+        ),
+        gr.Dropdown(
+            choices=[
+                "llama3.1:8b",
+                "llama3.1:70b",
+                "mistral:7b",
+                "qwen2.5:7b",
+            ],
+            value="llama3.1:8b",
+            label="Ranking model",
+            info="The selected model must already be available in Ollama.",
         ),
     ],
     outputs=gr.Markdown(),
