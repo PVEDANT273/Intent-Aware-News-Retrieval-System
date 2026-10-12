@@ -160,7 +160,7 @@ class Reasoner:
         scored.sort(key=lambda x: x[0], reverse=True)
 
         scored = self._diversify(scored)
-        
+
         if top_n is not None:
             scored = scored[:top_n]
 
@@ -229,9 +229,7 @@ class Reasoner:
         for entry in scored:
             _, item, articles = entry
 
-            source = pick_representative_article(articles).get(
-                "source", "unknown"
-            )
+            source = pick_representative_article(articles).get("source") or "unknown"
 
             if source_counts[source] < max_per_source:
                 ordered.append(entry)

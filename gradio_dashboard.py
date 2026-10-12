@@ -65,7 +65,14 @@ def format_results(results):
     return "\n\n".join(blocks)
 
 
-def gradio_app(topic, intent, num_fetch, num_results, selected_model):
+def gradio_app(
+    topic,
+    intent,
+    num_fetch,
+    num_results,
+    selected_model,
+    progress=gr.Progress(),
+):
     topic = (topic or "").strip()
     intent = (intent or "").strip()
 
@@ -73,18 +80,22 @@ def gradio_app(topic, intent, num_fetch, num_results, selected_model):
         raise gr.Error("Please enter both a topic and an intent.")
 
     try:
+        progress(0.1, desc="Fetching articles...")
         results = run_pipeline(
             topic,
             intent,
             int(num_fetch),
             int(num_results),
             selected_model,
+            progress,
         )
+
+        progress(1.0, desc="Done")
+
     except Exception as e:
         raise gr.Error(f"Something went wrong: {e}")
 
     return format_results(results)
-
 
 dashboard = gr.Interface(
     fn=gradio_app,
