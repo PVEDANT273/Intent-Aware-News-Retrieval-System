@@ -1,3 +1,4 @@
+from rapidfuzz import fuzz
 
 class ArticleCleaner:
     def normalize(self, api_response: dict) -> list:
@@ -17,24 +18,33 @@ class ArticleCleaner:
         return normalized
     
     
-    def remove_duplicates(self, normalized_articles):
+    def remove_duplicates(self, normalized_articles, title_threshold=90):
         seen_urls = set()
-        seen_titles = set()
+        kept_titles = []
         unique_articles = []
 
         for article in normalized_articles:
-            url = article['url'].lower().strip() if article['url'] else None
-            title = article['title'].lower().strip() if article['title'] else None
+            url = (article["url"] or "").lower().strip()
+            title = (article["title"] or "").lower().strip()
 
-            is_dup = (url is not None and url in seen_urls) or \
-                    (title is not None and title in seen_titles)
+            if url and url in seen_urls:
+                continue
 
-            if not is_dup:
-                unique_articles.append(article)
-                if url:
-                    seen_urls.add(url)
-                if title:
-                    seen_titles.add(title)
+            is_dup = any(
+                fuzz.token_sort_ratio(title, kept) >= title_threshold
+                for kept in kept_titles
+            )
+
+            if is_dup:
+                continue
+
+            unique_articles.append(article)
+
+            if url:
+                seen_urls.add(url)
+
+            if title:
+                kept_titles.append(title)
 
         return unique_articles
     
