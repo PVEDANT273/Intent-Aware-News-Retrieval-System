@@ -9,7 +9,9 @@ MAX_RETRIES = 3
 def pick_representative_article(articles):
     return max(
         articles,
-        key=lambda a: len((a.get("content") or "") + (a.get("description") or "")),
+        key=lambda a: len(
+            (a.get("content") or "") + (a.get("description") or "")
+        ),
     )
 
 
@@ -147,6 +149,28 @@ class Reasoner:
                 "reason": item["reason"],
                 "representative_article": pick_representative_article(articles),
                 "all_articles": articles,
+                "summary": self.summarize_group(articles),
             })
 
         return results
+
+    def summarize_group(self, group_articles):
+        texts = "\n".join(
+            f"- {a.get('title', '')}: {a.get('description', '')}"
+            for a in group_articles
+        )
+
+        prompt = f"""Summarize the following news coverage of the same
+                    story in 2-3 sentences. Be neutral and factual.
+
+                    {texts}
+
+                    Summary:"""
+
+        response = self.client.chat(
+            model=self.model,
+            messages=[{"role": "user", "content": prompt}],
+            options={"temperature": 0.2},
+        )
+
+        return response["message"]["content"].strip()
